@@ -54,7 +54,8 @@ def usage():
                     "-o : The prefix of output file, default = 'simulated'\n" \
                     "-n : Number of generated reads, default = 20,000 reads\n" \
                     "--perfect: Output perfect reads, no mutations, default = False\n" \
-                    "--KmerBias: prohibits homopolymers with length >= 6 bases in output reads\n"
+                    "--KmerBias: prohibits homopolymers with length >= 6 bases in output reads\n" \
+                    "-l : Length of generated reads, default = the same as the reference length\n"
 
     sys.stderr.write(usage_message)
 
@@ -146,7 +147,7 @@ def read_profile(number, model_prefix, per):
         if per or rate == "100%":
             number_aligned = number
         else:
-            number_aligned = int(round(number * float(rate) / (float(rate) + 1)))
+            number_aligned = number##int(round(number * float(rate) / (float(rate) + 1)))
         number_unaligned = number - number_aligned
         unaligned_dict = read_ecdf(u_profile)
 
@@ -198,8 +199,8 @@ def read_profile(number, model_prefix, per):
     aligned_dict.clear()
 
 
-def simulation(ref, out, dna_type, per, kmer_bias):
-    global unaligned_length, ref_length
+def simulation(ref, out, dna_type, per, kmer_bias, read_length):
+    global ref_length
     global genome_len, seq_dict, seq_len
     global match_ht_list, align_ratio, ht_dict, match_markov_model
     global trans_error_pr, error_par
@@ -229,32 +230,36 @@ def simulation(ref, out, dna_type, per, kmer_bias):
         seq_len[key] = len(seq_dict[key])
     genome_len = sum(seq_len.values())
 
+    if read_length == None:
+        read_length = genome_len
+    else:
+        read_length = read_length
     # Start simulation
     sys.stdout.write(strftime("%Y-%m-%d %H:%M:%S") + ": Start simulation of random reads\n")
     out_reads = open(out + "_reads.fasta", 'w')
     out_error = open(out + "_error_profile", 'w')
     out_error.write("Seq_name\tSeq_pos\terror_type\terror_length\tref_base\tseq_base\n")
 
-    # Simulate unaligned reads
-    num_unaligned_length = len(unaligned_length)
-    for i in xrange(num_unaligned_length):
-        unaligned = unaligned_length[i]
-        unaligned, error_dict = unaligned_error_list(unaligned, error_par)
-        new_read, new_read_name = extract_read(dna_type, unaligned)
-        new_read_name = new_read_name + "_unaligned_" + str(i)
-        read_mutated = mutate_read(new_read, new_read_name, out_error, error_dict, kmer_bias, False)
+    # # Simulate unaligned reads
+    # num_unaligned_length = len(unaligned_length)
+    # for i in xrange(num_unaligned_length):
+    #     unaligned = unaligned_length[i]
+    #     unaligned, error_dict = unaligned_error_list(unaligned, error_par)
+    #     new_read, new_read_name = extract_read(dna_type, unaligned)
+    #     new_read_name = new_read_name + "_unaligned_" + str(i)
+    #     read_mutated = mutate_read(new_read, new_read_name, out_error, error_dict, kmer_bias, False)
         
-        # Reverse complement half of the reads
-        p = random.random()
-        if p < 0.5:
-            read_mutated = reverse_complement(read_mutated)
-            new_read_name += "_R"
-        else:
-            new_read_name += "_F"
-        out_reads.write(">" + new_read_name + "_0_" + str(unaligned) + "_0" + '\n')
-        out_reads.write(read_mutated + "\n")
+    #     # Reverse complement half of the reads
+    #     p = random.random()
+    #     if p < 0.5:
+    #         read_mutated = reverse_complement(read_mutated)
+    #         new_read_name += "_R"
+    #     else:
+    #         new_read_name += "_F"
+    #     out_reads.write(">" + new_read_name + "_0_" + str(unaligned) + "_0" + '\n')
+    #     out_reads.write(read_mutated + "\n")
 
-    del unaligned_length
+    # del unaligned_length
 
     middle_length = []
     aligned_length = []
@@ -267,10 +272,9 @@ def simulation(ref, out, dna_type, per, kmer_bias):
     sys.stdout.write(strftime("%Y-%m-%d %H:%M:%S") + ": Start simulation of aligned reads\n")
     if per:
         for i in xrange(len(ref_length)):
-            new_read, new_read_name = extract_read(dna_type, ref_length[i])
+            new_read, new_read_name = extract_read(dna_type, read_length)
             new_read_name = new_read_name + "_perfect_" + str(i)
-            out_reads.write(">" + new_read_name + "_0_" + str(ref_length[i]) + "_0" + '\n')
-            
+            out_reads.write(">" + new_read_name + "_0_" + str(read_length) + "_0" + '\n')            
             # Reverse complement half of the reads
             p = random.random()
             if p < 0.5:
@@ -285,48 +289,12 @@ def simulation(ref, out, dna_type, per, kmer_bias):
         return
 
     for i in xrange(len(ref_length)):
-        middle, middle_ref, error_dict = error_list(ref_length[i], match_markov_model, match_ht_list, error_par,
+        middle, middle_ref, error_dict = error_list(genome_len, match_markov_model, match_ht_list, error_par,
                                                     trans_error_pr)
 
-        ref_length[i] = middle_ref
-        middle_length.append(middle)
-
-        for k_align in sorted(align_ratio.keys()):
-            if k_align[0] <= middle < k_align[1]:
-                break
-
-        p = random.random()
-        for k_r, v_r in align_ratio[k_align].items():
-            if k_r[0] <= p < k_r[1]:
-                ratio = (p - k_r[0])/(k_r[1] - k_r[0]) * (v_r[1] - v_r[0]) + v_r[0]
-                total = int(round(middle / ratio))
-                remainder = total - int(round(middle))
-                break
-        aligned_length.append(total)
-        middle_all_ratio.append(ratio)
-        remainder_length.append(remainder)
-
-        if remainder == 0:
-            head = 0
-            tail = 0
-        else:
-            for k_ht in sorted(ht_dict.keys()):
-                if k_ht[0] <= remainder < k_ht[1]:
-                    p = random.random()
-                    for k_h, v_h in ht_dict[k_ht].items():
-                        if k_h[0] <= p < k_h[1]:
-                            ratio = (p - k_h[0])/(k_h[1] - k_h[0]) * (v_h[1] - v_h[0]) + v_h[0]
-                            head = int(round(remainder * ratio))
-                            tail = remainder - head
-                            break
-                    break
-        head_length.append(head)
-        tail_length.append(tail)
-
         # Extract middle region from reference genome
-        new_read, new_read_name = extract_read(dna_type, middle_ref)
-        new_read_name = new_read_name + "_aligned_" + str(i + num_unaligned_length)
-
+        new_read, new_read_name = extract_read(dna_type, read_length)
+        new_read_name = new_read_name + "_aligned_" + str(i)
         # Mutate read
         read_mutated = mutate_read(new_read, new_read_name, out_error, error_dict, kmer_bias)
         
@@ -339,16 +307,16 @@ def simulation(ref, out, dna_type, per, kmer_bias):
             new_read_name += "_F"
             
         # Add head and tail region
-        for x in xrange(head):
-            new_base = random.choice(BASES)
-            read_mutated = new_base + read_mutated
+        # for x in xrange(head):
+        #     new_base = random.choice(BASES)
+        #     read_mutated = new_base + read_mutated
 
-        for x in xrange(tail):
-            new_base = random.choice(BASES)
-            read_mutated = read_mutated + new_base
+        # for x in xrange(tail):
+        #     new_base = random.choice(BASES)
+        #     read_mutated = read_mutated + new_base
 
-        out_reads.write(">" + new_read_name + "_" + str(head) + "_" + str(middle_ref) + "_" +
-                        str(tail) + '\n')
+        out_reads.write(">" + new_read_name + "_" + str(0) + "_" +
+                        str(0) + '\n')
         out_reads.write(read_mutated + '\n')
 
     out_reads.close()
@@ -517,6 +485,8 @@ def error_list(m_ref, m_model, m_ht_list, error_p, trans_p):
 
 def mutate_read(read, read_name, error_log, e_dict, bias, aligned=True):
     for key in sorted(e_dict.keys(), reverse=True):
+        if key >= len(read):## prevent out of range
+            continue
         val = e_dict[key]
         key = int(round(key))
 
@@ -526,14 +496,16 @@ def mutate_read(read, read_name, error_log, e_dict, bias, aligned=True):
                 new_bases = ""
                 for i in xrange(val[1]):
                     tmp_bases = list(BASES)
-                    tmp_bases.remove(read[key + i])
-                    new_base = random.choice(tmp_bases)
-                    new_bases += new_base
+                    ## prevent index out of range
+                    if key+i < len(read) and read[key+i]!="N":
+                        tmp_bases.remove(read[key + i])
+                        new_base = random.choice(tmp_bases)
+                        new_bases += new_base
                 check_kmer = read[key - 5: key] + new_bases + read[key + val[1]: key + val[1] + 5]
                 if not bias or not re.search("AAAAAA+|TTTTTT+|CCCCCC+|GGGGGG+", check_kmer):
                     break
             new_read = read[:key] + new_bases + read[key + val[1]:]
-
+            
         elif val[0] == "del":
             new_bases = val[1] * "-"
             ref_base = read[key: key + val[1]]
@@ -552,7 +524,6 @@ def mutate_read(read, read_name, error_log, e_dict, bias, aligned=True):
             new_read = read[:key] + new_bases + read[key:]
 
         read = new_read
-
         if aligned and val[0] != "match":
             error_log.write(read_name + "\t" + str(key) + "\t" + val[0] + "\t" + str(val[1]) +
                             "\t" + ref_base + "\t" + new_bases + "\n")
@@ -580,7 +551,7 @@ def main():
     del_rate = 1
     mis_rate = 1
     kmer_bias = False
-
+    read_length = None
     # Parse options and parameters
     if len(sys.argv) < 6:
         usage()
@@ -591,7 +562,7 @@ def main():
             usage()
             sys.exit(1)
         try:
-            opts, args = getopt.getopt(sys.argv[2:], "hr:c:o:n:i:d:m:", ["perfect", "KmerBias"])
+            opts, args = getopt.getopt(sys.argv[2:], "hr:c:o:n:i:d:m:l:", ["perfect", "KmerBias"])
         except getopt.GetoptError:
             usage()
             sys.exit(1)
@@ -614,6 +585,8 @@ def main():
                 perfect = True
             elif opt == "--KmerBias":
                 kmer_bias = True
+            elif opt == "-l":
+                read_length = int(arg)
             elif opt == "-h":
                 usage()
                 sys.exit(0)
@@ -634,7 +607,7 @@ def main():
     # Read in reference genome and generate simulated reads
     read_profile(number, model_prefix, perfect)
 
-    simulation(ref, out, dna_type, perfect, kmer_bias)
+    simulation(ref, out, dna_type, perfect, kmer_bias, read_length)
 
     sys.stdout.write(strftime("%Y-%m-%d %H:%M:%S") + ": Finished!")
     sys.stdout.close()
